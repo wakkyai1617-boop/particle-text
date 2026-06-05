@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Text</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#04040a;overflow:hidden}
+#c{position:fixed;inset:0;display:block}
+#ui{
+  position:fixed;bottom:0;left:0;right:0;
+  display:flex;flex-direction:column;align-items:center;
+  padding-bottom:32px;gap:10px;pointer-events:none;
+}
+#inp{
+  pointer-events:all;
+  background:transparent;border:none;
+  border-bottom:1px solid rgba(200,210,220,0.3);
+  color:rgba(200,210,220,0.85);
+  font-size:17px;font-family:'Courier New',monospace;
+  letter-spacing:6px;text-align:center;
+  padding:6px 20px 9px;outline:none;
+  width:min(440px,88vw);
+  caret-color:rgba(200,210,220,0.8);
+  transition:border-color .3s;
+}
+#inp:focus{border-color:rgba(200,210,220,0.6)}
+#inp::placeholder{color:rgba(200,210,220,0.2);letter-spacing:3px;font-size:13px}
+#hint{
+  font-family:'Courier New',monospace;font-size:10px;
+  color:rgba(255,255,255,0.13);letter-spacing:3px;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <input id="inp" type="text" placeholder="文字を入力..." maxlength="30" autocomplete="off" spellcheck="false">
+  <div id="hint">PARTICLE TEXT SYSTEM</div>
+</div>
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const inp=document.getElementById('inp');
+const TAU=Math.PI*2;
+let W,H;
+
+function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;}
+resize();
+addEventListener('resize',()=>{resize();if(curText)updateText(curText);});
+
+const N=5000;
+const px=new Float32Array(N),py=new Float32Array(N);
+const ptx=new Float32Array(N),pty=new Float32Array(N);
+const pz=new Float32Array(N);
+const sx=new Float32Array(N),sy=new Float32Array(N),sz=new Float32Array(N);
+const pl=new Uint8Array(N);
+const pr=new Float32Array(N);
+const pa=new Float32Array(N);
+
+for(let i=0;i<N;i++){
+  px[i]=Math.random()*innerWidth;
+  py[i]=Math.random()*innerHeight;
+  pl[i]=Math.random()*20|0;
+  pr[i]=Math.random()*1.2+0.5;
+  pa[i]=0.55+Math.random()*0.45;
+}
+
+// フィボナッチ球面座標
+const golden=Math.PI*(3-Math.sqrt(5));
+for(let i=0;i<N;i++){
+  const yy=1-(i/(N-1))*2;
+  const rr=Math.sqrt(Math.max(0,1-yy*yy));
+  const th=golden*i;
+  sx[i]=rr*Math.cos(th);
+  sy[i]=yy;
+  sz[i]=rr*Math.sin(th);
+}
+
+let diskAngle=0;
+
+function projectDisk(){
+  const cx=W/2,cy=H/2;
+  const R=Math.min(W,H)*0.38;
+  const fov=650;
+  const cosY=Math.cos(diskAngle),sinY=Math.sin(diskAngle);
+  // X軸傾き：約55度でディスクの奥行きが明確に見える
+  const tilt=0.95;
+  const cosX=Math.cos(tilt),sinX=Math.sin(tilt);
+  for(let i=0;i<N;i++){
+    // Y軸回転（スピン）
+    const rx=sx[i]*cosY-sz[i]*sinY;
+    const rz=sx[i]*sinY+sz[i]*cosY;
+    // X軸傾き
+    const ry2=sy[i]*cosX-rz*sinX;
+    const rz2=sy[i]*sinX+rz*cosX;
+    const scale=fov/(fov+R+rz2*R);
+    ptx[i]=cx+rx*R*scale;
+    pty[i]=cy+ry2*R*scale;
+    pz[i]=rz2;
+  }
+}
+
+function sampleText(text){
+  const off=document.createElement('canvas');off.width=W;off.height=H;
+  const oc=off.getContext('2d');
+  let fs=Math.min(H*0.32,230);
+  const setF=()=>{oc.font=`900 ${fs}px "Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Meiryo","Arial Black",Impact,sans-serif`;};
+  setF();oc.textAlign='center';oc.textBaseline='middle';
+  const mw=W*0.84;
+  if(oc.measureText(text).width>mw){fs*=mw/oc.measureText(text).width;setF();}
+  oc.fillStyle='#fff';oc.fillText(text,W/2,H/2);
+  const d=oc.getImageData(0,0,W,H).data;
+  const pts=[];const gap=Math.max(3,Math.round(5*800/W));
+  for(let y=0;y<H;y+=gap)for(let x=0;x<W;x+=gap)if(d[(y*W+x)*4+3]>100)pts.push(x,y);
+  return pts;
+}
+
+function shuffle(a){
+  const len=a.length/2;
+  for(let i=len-1;i>0;i--){
+    const j=Math.random()*(i+1)|0,ix=i*2,jx=j*2;
+    let t=a[ix];a[ix]=a[jx];a[jx]=t;
+    t=a[ix+1];a[ix+1]=a[jx+1];a[jx+1]=t;
+  }
+}
+
+let curText='';
+function updateText(text){
+  curText=text;
+  if(!text.trim()){curText='';return;}
+  const pts=sampleText(text);shuffle(pts);const count=pts.length/2;
+  for(let i=0;i<N;i++){
+    if(i<count){ptx[i]=pts[i*2];pty[i]=pts[i*2+1];}
+    else{
+      const e=Math.random()*4|0;
+      if(e===0){ptx[i]=-40;pty[i]=Math.random()*H;}
+      else if(e===1){ptx[i]=W+40;pty[i]=Math.random()*H;}
+      else if(e===2){ptx[i]=Math.random()*W;pty[i]=-40;}
+      else{ptx[i]=Math.random()*W;pty[i]=H+40;}
+    }
+  }
+}
+
+function loop(){
+  ctx.fillStyle='rgba(4,4,10,0.2)';
+  ctx.fillRect(0,0,W,H);
+
+  const isDisk=!curText;
+  if(isDisk){
+    diskAngle+=0.004;
+    projectDisk();
+  }
+
+  for(let i=0;i<N;i++){
+    px[i]+=(ptx[i]-px[i])*0.09;
+    py[i]+=(pty[i]-py[i])*0.09;
+
+    const z=isDisk?pz[i]:0;
+    const depth=isDisk?(0.4+0.6*(z+1)*0.5):1;
+    const lit=72+pl[i];
+    const r=pr[i]*(isDisk?depth:1);
+    const alpha=pa[i]*depth;
+
+    ctx.beginPath();ctx.arc(px[i],py[i],r+2.5,0,TAU);
+    ctx.fillStyle=`rgba(210,215,220,${(isDisk?0.025*depth:0.04).toFixed(4)})`;
+    ctx.fill();
+    ctx.beginPath();ctx.arc(px[i],py[i],r,0,TAU);
+    ctx.fillStyle=`hsla(210,8%,${lit}%,${alpha.toFixed(3)})`;
+    ctx.fill();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+inp.focus();
+
+let db;
+inp.addEventListener('input',()=>{clearTimeout(db);db=setTimeout(()=>updateText(inp.value),80);});
+</script>
+</body>
+</html>
